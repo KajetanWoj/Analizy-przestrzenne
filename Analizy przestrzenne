@@ -1,0 +1,270 @@
+import sys
+import arcpy
+from arcpy.sa import *
+
+# nadpisywanie plików
+arcpy.env.overwriteOutput=True
+
+# sprawdzanie rozszerzeń
+# https://pro.arcgis.com/en/pro-app/latest/arcpy/functions/checkextension.htm
+arcpy.CheckOutExtension("Spatial")
+arcpy.CheckOutExtension("3D")
+
+# ustawienia środowiska pracy
+# data paths (ścieżka do katalogu)
+arcpy.env.workspace = r"S:\Studia\semestr5\AnalizyPrzestrzenne\Projekt1_nowy\Projekt1\wyniki"
+#arcpy.env.workspace = r"C:\Studia\semestr5\AnalizyPrzestrzenne\Projekt1_nowy\Projekt1\wyniki"
+
+# processing extent (obszar, zakres na którym beda wykonywane analizy)
+arcpy.env.extent = r"S:\Studia\semestr5\AnalizyPrzestrzenne\Projekt1_nowy\Projekt1\swieradow_zdroj_bufor.shp"
+#arcpy.env.extent = r"C:\Studia\semestr5\AnalizyPrzestrzenne\Projekt1_nowy\Projekt1\swieradow_zdroj_bufor.shp"
+
+# output coordinate system
+arcpy.env.outputCoordinateSystem = arcpy.SpatialReference("ETRS 1989 Poland CS92")
+
+# cell size (rozdzielczosc przestrzenna: raster 1m)
+arcpy.env.cellSize = 1
+
+#przypisywanie warstw do zmiennych
+hotele = "hotele"
+bufor = "swieradow_zdroj_bufor.shp"
+gmina = "swieradow_zdroj.shp"
+budynki = "PL.PZGiK.337.0210__OT_BUBD_A"
+lasy = "PL.PZGiK.337.0210__OT_PTLZ_A"
+wody = "PL.PZGiK.337.0210__OT_PTWP_A"
+drogi = "PL.PZGiK.337.0210__OT_SKDR_L"
+rzeki = "PL.PZGiK.337.0210__OT_SWRS_L"
+raster = "raster.tif"
+gazociag = "gazociag.shp"
+
+# wyliczenie dystansu euklidesowego, stworzenie na jego podstawie mapy odległości, przycięcie do badanego obszaru oraz utworzenie 
+# kryterium miękkiego
+euclidean_distance = EucDistance("hotele")
+mapa_odl1 = ExtractByMask(euclidean_distance, gmina)
+mapa_kryt1 = FuzzyMembership(mapa_odl1, FuzzyLinear(400, 500)) 
+
+# wyliczenie dystansu euklidesowego, stworzenie na jego podstawie mapy odległości, przycięcie do badanego obszaru oraz utworzenie 
+# kryterium miękkiego
+arcpy.management.SelectLayerByAttribute(budynki, "NEW_SELECTION", "X_KOD = 'BUBD01' Or X_KOD = 'BUBD03' Or X_KOD = 'BUBD04'", None)
+arcpy.management.CopyFeatures(budynki, r"budynki_mieszkalne")
+euclidean_distance = EucDistance("budynki_mieszkalne.shp")
+mapa_odl2 = ExtractByMask(euclidean_distance, gmina)
+mapa_kryt2_1 = FuzzyMembership(mapa_odl2, FuzzyLinear(0, 25)) 
+mapa_kryt2_2 = FuzzyMembership(mapa_odl2, FuzzyLinear(175, 150))
+mapa_kryt2 = Times(mapa_kryt2_1, mapa_kryt2_2)
+arcpy.management.SelectLayerByAttribute(budynki, "CLEAR_SELECTION", "X_KOD = 'BUBD01' Or X_KOD = 'BUBD03' Or X_KOD = 'BUBD04'", None)
+
+# wyliczenie dystansu euklidesowego, stworzenie na jego podstawie mapy odległości, przycięcie do badanego obszaru oraz utworzenie 
+# kryterium miękkiego
+arcpy.management.CopyFeatures(drogi, r"drogi")
+euclidean_distance = EucDistance("drogi")
+mapa_odl3 = ExtractByMask(euclidean_distance, gmina)
+mapa_kryt3_1 = FuzzyMembership(mapa_odl3, FuzzyLinear(0, 15)) 
+mapa_kryt3_2 = FuzzyMembership(mapa_odl3, FuzzyLinear(115, 100))
+mapa_kryt3 = Times(mapa_kryt3_1, mapa_kryt3_2)
+
+# wyliczenie dystansu euklidesowego, stworzenie na jego podstawie mapy odległości, przycięcie do badanego obszaru oraz utworzenie 
+# kryterium miękkiego oraz kryterium ostrego, wykonane oddzielnie dla warstwy liniowej (cieków) i poligonowej (wód powierzchniowych)
+arcpy.management.CopyFeatures(rzeki, r"rzeki")
+euclidean_distance = EucDistance("rzeki")
+mapa_odl4_1 = ExtractByMask(euclidean_distance, gmina)
+mapa_kryt4_1_1 = FuzzyMembership(mapa_odl4_1, FuzzyLinear(20, 20.1))
+mapa_kryt4_1_2 = FuzzyMembership(mapa_odl4_1, FuzzyLinear(1000, 50))
+arcpy.management.CopyFeatures(wody, r"wody_powierzchniowe")
+euclidean_distance = EucDistance("wody_powierzchniowe")
+mapa_odl4_2 = ExtractByMask(euclidean_distance, gmina)
+mapa_kryt4_2_1 = FuzzyMembership(mapa_odl4_2, FuzzyLinear(20, 20.1))
+mapa_kryt4_2_2 = FuzzyMembership(mapa_odl4_2, FuzzyLinear(1000, 50))
+mapa_kryt4_1 = Times(mapa_kryt4_1_1, mapa_kryt4_1_2)
+mapa_kryt4_2 = Times(mapa_kryt4_2_1, mapa_kryt4_2_2)
+
+# selekcja odpowiednich atrybutów z warstwy pokrycia terenu, konwersja warstwy wektorowej do rastra, reklasyfikacja rastra, przycięcie
+# warstwy do granic gminy, wyczyszczenie selekcji na samym końcu
+arcpy.management.SelectLayerByAttribute(lasy, "NEW_SELECTION", "RODZAJ = 'las' Or RODZAJ = 'zagajnik'", None)
+arcpy.management.CopyFeatures(lasy, r"lasy")
+
+arcpy.conversion.FeatureToRaster("lasy", "RODZAJ", r"mapa_lasy", 1)
+arcpy.ddd.Reclassify("mapa_lasy", "RODZAJ", "las 0;zagajnik 0;NODATA 1", r"mapa_kryt5_1", "DATA")
+mapa_kryt5 = ExtractByMask("mapa_kryt5_1", gmina)
+arcpy.management.SelectLayerByAttribute(lasy, "CLEAR_SELECTION", "RODZAJ = 'las' Or RODZAJ = 'zagajnik'", None)
+
+# stworzenie mapy procentowego nachylenia stoków, przycięcie jej do granic gminy a na końcu utworzenie kryterium miękkiego
+outSlope = Slope(raster, "PERCENT_RISE")
+mapa_spad = ExtractByMask(outSlope, gmina)
+mapa_kryt6 = FuzzyMembership(mapa_spad, FuzzyLinear(21, 10))
+
+# stworzenie mapy oświetlenia terenu, przycięcie jej do granic gminy, stworzenie kryterium miękkiego, gdzie najwyższą wartością 
+# cechują się stoki o ekspozycji południowej oraz tereny płaskie
+outAspect = Aspect(raster)
+mapa_aspect = ExtractByMask(outAspect, gmina)
+mapa_kryt7_1 = FuzzyMembership(mapa_aspect, FuzzyLinear(70, 112.5))
+mapa_kryt7_2 = FuzzyMembership(mapa_aspect, FuzzyLinear(270, 217.5))
+mapa_kryt7_3 = mapa_kryt7_1*mapa_kryt7_2
+mapa_kryt7 = Con(mapa_aspect, 1, mapa_kryt7_3, "VALUE = -1")
+
+# wyliczenie dystansu euklidesowego, stworzenie na jego podstawie mapy odległości oraz utworzenie kryterium miękkiego oraz ostrego
+arcpy.management.CopyFeatures(gazociag, r"gazociag")
+euclidean_distance = EucDistance(gazociag)
+mapa_odl8 = ExtractByMask(euclidean_distance, gmina)
+mapa_kryt8_1 = FuzzyMembership(mapa_odl8, FuzzyLinear(25, 25.1))
+mapa_kryt8_2 = FuzzyMembership(mapa_odl8, FuzzyLinear(25, 250))
+mapa_kryt8 = Times(mapa_kryt8_1, mapa_kryt8_2)
+
+# stworzenie warstwy rastrowej, w której gleby, na których budowa hotelu jest niemożliwa przyjmują wartość 0
+arcpy.management.CalculateField("gleby_gm_swieradow", "Usefulness", "uzytki(!TYP!)", "PYTHON3", """def uzytki(typ):
+    if typ in ['G','E','M','T','F','Fb','Fc','FG']:
+        return 0
+    else:
+        return 1""", "SHORT", "NO_ENFORCE_DOMAINS")
+
+arcpy.conversion.FeatureToRaster("gleby_gm_swieradow", "Usefulness", r"mapa_kryt9", 1)
+
+#Łączenie kryteriów miękkich z równymi wagami
+sameWeights = WeightedSum(WSTable([["mapa_kryt1", "VALUE", 0.125], ["mapa_kryt2", "VALUE",0.125], ["mapa_kryt3", "VALUE", 0.125],
+                                  ["mapa_kryt4_1", "VALUE", 0.125], ["mapa_kryt4_2", "VALUE", 0.125], ["mapa_kryt6", "VALUE", 0.125], 
+                                  ["mapa_kryt7", "VALUE", 0.125], ["mapa_kryt8", "VALUE", 0.125]]))
+
+#Łączenie kryteriów miękkich z różnymi wagami
+differentWeights = WeightedSum(WSTable([["mapa_kryt1", "VALUE", 0.05], ["mapa_kryt2", "VALUE",0.1], ["mapa_kryt3", "VALUE", 0.2],
+                                  ["mapa_kryt4_1", "VALUE", 0.2], ["mapa_kryt4_2", "VALUE", 0.2], ["mapa_kryt6", "VALUE", 0.1], 
+                                  ["mapa_kryt7", "VALUE", 0.05], ["mapa_kryt8", "VALUE", 0.1]]))
+
+#Łączenie kryteriów ostrych
+outFzyOverlay = FuzzyOverlay(["mapa_kryt5", "mapa_kryt9", "mapa_kryt8_1", "mapa_kryt4_1_1", "mapa_kryt4_2_1"], "AND")
+
+#Łączenie kryteriów miękkich z równymi wagami i ostrych
+same_weights = sameWeights * outFzyOverlay
+
+#Łączenie kryteriów miękkich z różnymi wagami i ostrych
+different_weights = differentWeights * outFzyOverlay
+
+#Reklasyfikacja 
+reclass_same = Reclassify(same_weights, "VALUE", "0 0,8 0;0,8 1 1") 
+
+reclass_different = Reclassify(different_weights, "VALUE", "0 0,8 0;0,8 1 1")
+
+# połączenie warstw pokrycia terenu w jedną, dodanie nowego atrybutu "koszt" i przypisanie jego wartości poszczególnym rodzajom
+# pokrycia, a na końcu zamiana warstwy wektorowej na rastrową
+pokrycie_terenu = arcpy.management.Merge(['PL.PZGiK.337.0210__OT_PTZB_A', 'PL.PZGiK.337.0210__OT_PTWZ_A', 
+                                          'PL.PZGiK.337.0210__OT_PTWP_A', 'PL.PZGiK.337.0210__OT_PTUT_A', 
+                                          'PL.PZGiK.337.0210__OT_PTTR_A', 'PL.PZGiK.337.0210__OT_PTSO_A', 
+                                          'PL.PZGiK.337.0210__OT_PTRK_A', 'PL.PZGiK.337.0210__OT_PTPL_A', 
+                                          'PL.PZGiK.337.0210__OT_PTNZ_A', 'PL.PZGiK.337.0210__OT_PTLZ_A', 
+                                          'PL.PZGiK.337.0210__OT_PTKM_A', 'PL.PZGiK.337.0210__OT_PTGN_A'], "pokrycie_terenu")
+
+arcpy.management.CalculateField("pokrycie_terenu", "koszt", "temp(!X_KOD!)", "PYTHON3", """def temp(kod):
+    dict = {'PTWP01':0,
+    'PTWP02':200,
+    'PTWP03':0,
+    'PTZB01':200,
+    'PTZB02':100,
+    'PTZB03':200,
+    'PTZB04':200,
+    'PTZB05':50,
+    'PTLZ01':100,
+    'PTLZ02':50,
+    'PTLZ03':50,
+    'PTRK':15,
+    'PTRK02':15,
+    'PTUT01':0,
+    'PTUT02':90,
+    'PTUT03':100,
+    'PTUT04':20,
+    'PTUT05':20,
+    'PTTR01':20,
+    'PTTR02':1,
+    'PTKM01':100,
+    'PTKM02':200,
+    'PTKM03':0,
+    'PTKM04':0,
+    'PTGN01':1,
+    'PTGN02':1,
+    'PTGN03':1,
+    'PTGN04':1,
+    'PTPL01':50,
+    'PTSO01':0,
+    'PTSO02':0,
+    'PTWZ01':0,
+    'PTWZ02':0,
+    'PTNZ01':150,
+    'PTNZ02':150}
+
+    
+    return dict[kod]
+
+""", "SHORT", "NO_ENFORCE_DOMAINS")
+
+arcpy.PolygonToRaster_conversion("pokrycie_terenu", "koszt", "pokrycie")
+mapa_kosztow = arcpy.sa.Reclassify("pokrycie", "Value", "0 NODATA;1 1;15 15;20 20;50 50;100 100;150 150;200 200", "DATA"); 
+mapa_kosztow = arcpy.sa.ExtractByMask("mapa_kosztow", gmina)
+
+# zamiana warstw rastrowych będących wynikami łączenia kryteriów na warstwy wektorowe, żeby można było zastosować funkcję Tabulate
+# Intersection, następnie wyselekcjonowanie poligonów, które w warstwie rastrowej miały wartość 1, stworzenie tabel, które informują
+# o stopniu spełnienia kryteriów dla danej działki, połączenie nowo stworzonych tabel z tabelą atrybutów warstwy działek, selekcja
+# działek, które spełniają kryteria w co najmniej 70%, stworzenie nowej warstwy działek ze stałym atrybutem powierzchni spełniającej
+# kryteria, połączenie graniczących ze sobą wyselekcjonowanych działek 
+arcpy.RasterToPolygon_conversion("reclass_different", "reclass_different_A", "NO_SIMPLIFY", "VALUE")
+arcpy.RasterToPolygon_conversion("reclass_same", "reclass_same_A", "NO_SIMPLIFY", "VALUE")
+
+arcpy.management.SelectLayerByAttribute("reclass_different_A", "NEW_SELECTION", "gridcode = 1", None)
+arcpy.management.SelectLayerByAttribute("reclass_same_A", "NEW_SELECTION", "gridcode = 1", None)
+
+arcpy.analysis.TabulateIntersection("dzialki", "ID_DZIALKI", "reclass_different_A", "dzialki_wynik_tabela_1")
+arcpy.analysis.TabulateIntersection("dzialki", "ID_DZIALKI", "reclass_same_A", "dzialki_wynik_tabela_2")
+
+arcpy.management.SelectLayerByAttribute("reclass_different_A", "CLEAR_SELECTION", "gridcode = 1", None)
+arcpy.management.SelectLayerByAttribute("reclass_same_A", "CLEAR_SELECTION", "gridcode = 1", None)
+
+arcpy.management.CopyFeatures("dzialki", r"dzialki_2")
+
+arcpy.management.AddJoin("dzialki", "ID_DZIALKI", "dzialki_wynik_tabela_1", "ID_DZIALKI")
+arcpy.management.SelectLayerByAttribute("dzialki", "NEW_SELECTION", "PERCENTAGE >= 70", None)
+arcpy.management.CopyFeatures("dzialki", r"dzialki_rozne_wagi")
+arcpy.management.SelectLayerByAttribute("dzialki", "CLEAR_SELECTION", "PERCENTAGE >= 70", None)
+
+arcpy.management.AddJoin("dzialki_2", "ID_DZIALKI", "dzialki_wynik_tabela_2", "ID_DZIALKI")
+arcpy.management.SelectLayerByAttribute("dzialki_2", "NEW_SELECTION", "PERCENTAGE >= 70", None)
+arcpy.management.CopyFeatures("dzialki_2", r"dzialki_rowne_wagi")
+arcpy.management.SelectLayerByAttribute("dzialki_2", "CLEAR_SELECTION", "PERCENTAGE >= 70", None)
+
+arcpy.management.Dissolve("dzialki_rozne_wagi", "dzialki_rozne_wagi_dissolved", None, None, "SINGLE_PART")
+arcpy.management.Dissolve("dzialki_rowne_wagi", "dzialki_rowne_wagi_dissolved", None, None, "SINGLE_PART")
+
+arcpy.management.SelectLayerByAttribute("dzialki_rozne_wagi_dissolved", "NEW_SELECTION", "Shape_area >= 10000", None)
+arcpy.management.SelectLayerByAttribute("dzialki_rowne_wagi_dissolved", "NEW_SELECTION", "Shape_area >= 10000", None)
+
+# stworzenie mapy kosztów skumulowanych i mapy kierunków 
+costRozne_wagi = arcpy.sa.CostDistance("dzialki_rozne_wagi_dissolved", "mapa_kosztow")
+costRowne_wagi = arcpy.sa.CostDistance("dzialki_rowne_wagi_dissolved", "mapa_kosztow")
+
+kierunkiRozne = arcpy.sa.CostBackLink("dzialki_rozne_wagi_dissolved", "mapa_kosztow")
+kierunkiRowne = arcpy.sa.CostBackLink("dzialki_rowne_wagi_dissolved", "mapa_kosztow")
+
+# stworzenie pojedynczego najtańszego przyłącza, wyczyszczenie selekcji warstw działek, konwersja rastra z przyłączem do warstwy 
+# wektorowej
+outCostPath_rozne = arcpy.sa.CostPath("gazociag", "costRozne_wagi", "kierunkiRozne", "BEST_SINGLE")
+outCostPath_rowne = arcpy.sa.CostPath("gazociag", "costRowne_wagi", "kierunkiRowne", "BEST_SINGLE")
+
+arcpy.management.SelectLayerByAttribute("dzialki_rozne_wagi_dissolved", "CLEAR_SELECTION", "Shape_area >= 10000", None)
+arcpy.management.SelectLayerByAttribute("dzialki_rowne_wagi_dissolved", "CLEAR_SELECTION", "Shape_area >= 10000", None)
+
+arcpy.RasterToPolyline_conversion("outCostPath_rozne", "przylacze_rozne", None, None, "SIMPLIFY")
+arcpy.RasterToPolyline_conversion("outCostPath_rowne", "przylacze_rowne", None, None, "SIMPLIFY")
+
+# wyselekcjonowanie działek o akceptowalnej powierzchni powyżej 1 hektara, stworzenie nowej kolumny, która przechowuje współczynnik
+# zwartości obszaru, wybór pojedynczej działki o najwiekszym współczynniku zwartości, wyczyszczenie selekcji
+arcpy.management.SelectLayerByAttribute("dzialki_rozne_wagi_dissolved", "NEW_SELECTION", "Shape_area >= 10000", None)
+arcpy.management.SelectLayerByAttribute("dzialki_rowne_wagi_dissolved", "NEW_SELECTION", "Shape_area >= 10000", None)
+
+arcpy.management.CalculateField("dzialki_rozne_wagi_dissolved", "Compactness", "(!Shape_Area!/(math.pi*(!Shape_Length!/(2*math.pi))*2))*0.5",
+                                "PYTHON3", None, "DOUBLE")
+arcpy.management.CalculateField("dzialki_rowne_wagi_dissolved", "Compactness", "(!Shape_Area!/(math.pi*(!Shape_Length!/(2*math.pi))*2))*0.5",
+                                "PYTHON3", None, "DOUBLE")
+
+arcpy.analysis.Select("dzialki_rozne_wagi_dissolved", "dzialka_wynik_1", 
+                      "Compactness = (SELECT (MAX(Compactness)) FROM dzialki_rozne_wagi_dissolved)")
+arcpy.analysis.Select("dzialki_rowne_wagi_dissolved", "dzialka_wynik_2", 
+                      "Compactness = (SELECT (MAX(Compactness)) FROM dzialki_rowne_wagi_dissolved)")
+
+arcpy.management.SelectLayerByAttribute("dzialki_rozne_wagi_dissolved", "CLEAR_SELECTION", "Shape_area >= 10000", None)
+arcpy.management.SelectLayerByAttribute("dzialki_rowne_wagi_dissolved", "CLEAR_SELECTION", "Shape_area >= 10000", None)
